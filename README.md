@@ -16,8 +16,13 @@ Zapp is a prototype mobile application and custom keyboard extension for sending
 ```bash
 npm run dev
 npm run build
+npm start
 npm test
 npm run lint
 ```
+
+## Deploying on Railway
+
+This repo is ready for Railway as a Node.js service. Push the repository root to GitHub, create a Railway project from that repo, and keep the Railway root directory pointed at the folder containing `package.json`. Railway can then use `railway.json` to run `npm run build` and `npm start`. See `docs/railway-deploy.md` for details.
 
 The repository intentionally avoids generated native project files in this first implementation so the product model, data contracts, and core algorithms can be tested without platform-specific build tooling.

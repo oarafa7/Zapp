@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node scripts/dev-server.js",
     "build": "node scripts/build-frontend.js",
+    "start": "node server.js",
     "test": "node --test",
     "lint": "node scripts/validate-catalog.js"
   },
@@ -17,5 +18,8 @@
   ],
   "license": "UNLICENSED",
   "private": true,
-  "devDependencies": {}
+  "devDependencies": {},
+  "engines": {
+    "node": ">=20"
+  }
 }
