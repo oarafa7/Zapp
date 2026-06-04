@@ -4,6 +4,7 @@ Zapp is a prototype mobile application and custom keyboard extension for sending
 
 ## What is included
 
+- A no-dependency web frontend framework with a polished landing page, keyboard mockup, search controls, and send payload preview.
 - A React Native app shell that supports the core `Search > Tap > Sent` journey.
 - A keyboard extension integration contract for iOS and Android host apps.
 - A searchable Audio GIF catalog seeded with Arabic and international culture examples.
@@ -13,6 +14,8 @@ Zapp is a prototype mobile application and custom keyboard extension for sending
 ## Development commands
 
 ```bash
+npm run dev
+npm run build
 npm test
 npm run lint
 ```

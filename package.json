@@ -1,9 +1,11 @@
 {
   "name": "zapp-audio-gifs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Prototype mobile app, keyboard extension, and backend modules for sending Zapp Audio GIFs.",
   "type": "module",
   "scripts": {
+    "dev": "node scripts/dev-server.js",
+    "build": "node scripts/build-frontend.js",
     "test": "node --test",
     "lint": "node scripts/validate-catalog.js"
   },
