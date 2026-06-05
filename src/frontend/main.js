@@ -195,14 +195,15 @@ function renderReceipt(selectedClip) {
 }
 
 function renderTrimControls() {
-  if (editor.loading) return `<p class="trim-hint">Analyzing audio…</p>`;
   if (!editor.file) return '';
+  const fileLine = `<p class="selected-file">📎 <strong>${escapeHtml(editor.file.name)}</strong> ready</p>`;
+  if (editor.loading) return `${fileLine}<p class="trim-hint">Analyzing audio…</p>`;
   if (!editor.buffer) {
     const prefix = editor.error ? `${escapeHtml(editor.error)} ` : '';
-    return `<p class="trim-hint">${prefix}Trimming isn’t available for this file — it will upload as-is.</p>`;
+    return `${fileLine}<p class="trim-hint">${prefix}Trimming isn’t available for this file — it will upload as-is.</p>`;
   }
   const dur = editor.duration;
-  return `
+  return `${fileLine}
     <div class="trim-editor" aria-label="Trim audio before saving">
       <div class="trim-editor__row">
         <strong>Trim</strong>
@@ -233,7 +234,7 @@ function renderUpload() {
           <span>Audio file (mp3, wav, m4a, ogg · max 5MB)</span>
           <input id="upload-file" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac,.opus,.webm" required />
         </label>
-        ${renderTrimControls()}
+        <div id="trim-container">${renderTrimControls()}</div>
         <div class="upload-or"><span>need a clip?</span></div>
         <a class="capture-link" href="https://ezrip.net/56jz" target="_blank" rel="noopener noreferrer">🎵 Capture audio here</a>
         <p class="trim-hint">Rip &amp; download an MP3 there, then choose it above to trim &amp; save.</p>
@@ -355,6 +356,12 @@ function bindEvents() {
     handleFileSelected(event.target);
   });
 
+  bindTrimEvents();
+}
+
+// Trim controls live in their own container that we refresh in place (without a
+// full re-render), so choosing a file never wipes the file input or typed text.
+function bindTrimEvents() {
   document.getElementById('trim-start')?.addEventListener('input', (event) => {
     editor.start = Math.min(Number(event.target.value), editor.end - 0.05);
     if (editor.start < 0) editor.start = 0;
@@ -379,6 +386,13 @@ function bindEvents() {
     if (endEl) endEl.value = editor.duration;
     updateTrimReadout();
   });
+}
+
+function updateTrimContainer() {
+  const container = document.getElementById('trim-container');
+  if (!container) return;
+  container.innerHTML = renderTrimControls();
+  bindTrimEvents();
 }
 
 function updateTrimReadout() {
@@ -421,7 +435,7 @@ async function handleFileSelected(input) {
   editor.buffer = null;
   editor.error = '';
   editor.loading = true;
-  render();
+  updateTrimContainer();
   try {
     const buffer = await decodeAudioFile(file);
     editor.buffer = buffer;
@@ -432,7 +446,7 @@ async function handleFileSelected(input) {
     editor.error = 'Could not read this audio for trimming.';
   } finally {
     editor.loading = false;
-    render();
+    updateTrimContainer();
   }
 }
 
