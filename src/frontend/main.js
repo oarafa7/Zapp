@@ -193,7 +193,7 @@ function renderUpload() {
       <form id="upload-form" class="upload-form">
         <label class="upload-field">
           <span>Audio file (mp3, wav, m4a, ogg · max 5MB)</span>
-          <input id="upload-file" type="file" accept="audio/*" required />
+          <input id="upload-file" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac,.opus,.webm" required />
         </label>
         <label class="upload-field">
           <span>Title</span>
@@ -334,7 +334,7 @@ async function uploadClip(form) {
   if (!triggers) return setUploadStatus('Add at least one trigger tag.', true);
 
   setUploadStatus('Uploading…', false);
-  const params = new URLSearchParams({ title, triggers, locale, icon });
+  const params = new URLSearchParams({ title, triggers, locale, icon, filename: file.name || '' });
   const headers = { 'content-type': file.type || 'application/octet-stream' };
   if (token) headers['x-zapp-admin'] = token;
 

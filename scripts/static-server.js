@@ -76,6 +76,7 @@ async function handleClipUpload(request, response, url, dataDirectory) {
       locale: url.searchParams.get('locale'),
       icon: url.searchParams.get('icon'),
       contentType: request.headers['content-type'],
+      fileName: url.searchParams.get('filename'),
       buffer
     });
     sendJson(response, 201, { clip });

@@ -29,6 +29,22 @@ export function extensionForContentType(contentType = '') {
   return CONTENT_TYPE_EXTENSIONS[contentType.split(';')[0].trim().toLowerCase()] || null;
 }
 
+// Some platforms (notably iOS) send an empty or generic content-type, so we
+// fall back to the file's extension to recognize the audio format.
+const EXTENSION_ALIASES = {
+  '.mp3': '.mp3',
+  '.wav': '.wav',
+  '.ogg': '.ogg',
+  '.opus': '.ogg',
+  '.m4a': '.m4a',
+  '.aac': '.m4a',
+  '.webm': '.webm'
+};
+
+export function extensionForFileName(fileName) {
+  return EXTENSION_ALIASES[extname(String(fileName || '')).toLowerCase()] || null;
+}
+
 function slugify(value, fallback = 'clip') {
   const slug = String(value)
     .toLowerCase()
@@ -66,13 +82,13 @@ export async function listUploadedClips(dataDirectory) {
   return readCatalog(resolveDataDir(dataDirectory));
 }
 
-export async function addUploadedClip(dataDirectory, { title, triggers, locale, icon, contentType, buffer }) {
+export async function addUploadedClip(dataDirectory, { title, triggers, locale, icon, contentType, fileName, buffer }) {
   const dataDir = resolveDataDir(dataDirectory);
   const cleanTitle = String(title || '').trim();
   if (!cleanTitle) throw new ClipUploadError('A clip title is required.', 400);
 
-  const ext = extensionForContentType(contentType);
-  if (!ext) throw new ClipUploadError(`Unsupported audio type: ${contentType || 'unknown'}`, 415);
+  const ext = extensionForContentType(contentType) || extensionForFileName(fileName);
+  if (!ext) throw new ClipUploadError(`Unsupported audio type: ${contentType || fileName || 'unknown'}`, 415);
   if (!buffer?.length) throw new ClipUploadError('The uploaded audio file is empty.', 400);
   if (buffer.length > MAX_UPLOAD_BYTES) throw new ClipUploadError('Audio file exceeds the 5 MB limit.', 413);
 
@@ -85,8 +101,8 @@ export async function addUploadedClip(dataDirectory, { title, triggers, locale, 
   await mkdir(join(dataDir, 'audio'), { recursive: true });
 
   const id = `upload-${slugify(cleanTitle)}-${Date.now().toString(36)}`;
-  const fileName = `${id}${ext}`;
-  await writeFile(join(dataDir, 'audio', fileName), buffer);
+  const storedFileName = `${id}${ext}`;
+  await writeFile(join(dataDir, 'audio', storedFileName), buffer);
 
   const clip = {
     id,
@@ -99,8 +115,8 @@ export async function addUploadedClip(dataDirectory, { title, triggers, locale, 
     characterTags: ['upload'],
     icon: icon || '🔊',
     artworkCue: 'uploaded clip',
-    audioUrl: `/uploads/audio/${fileName}`,
-    previewUrl: `/uploads/audio/${fileName}`,
+    audioUrl: `/uploads/audio/${storedFileName}`,
+    previewUrl: `/uploads/audio/${storedFileName}`,
     attribution: 'Sent via Zapp',
     rightsStatus: 'user-upload',
     popularity: 80,

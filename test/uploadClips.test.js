@@ -6,7 +6,28 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequestHandler } from '../scripts/static-server.js';
-import { addUploadedClip, listUploadedClips, resolveUploadPath } from '../scripts/clipStore.js';
+import { addUploadedClip, listUploadedClips, resolveUploadPath, extensionForFileName } from '../scripts/clipStore.js';
+
+test('detects audio type from filename when content-type is missing (iOS)', async () => {
+  assert.equal(extensionForFileName('song.mp3'), '.mp3');
+  assert.equal(extensionForFileName('clip.AAC'), '.m4a');
+  assert.equal(extensionForFileName(null), null);
+  assert.equal(extensionForFileName('notes.txt'), null);
+
+  const dataDir = await mkdtemp(join(tmpdir(), 'zapp-data-'));
+  try {
+    const clip = await addUploadedClip(dataDir, {
+      title: 'iPhone Clip',
+      triggers: 'hype',
+      contentType: 'application/octet-stream', // iOS often sends this or empty
+      fileName: 'whatsapp-voice.mp3',
+      buffer: Buffer.from('fake-mp3-bytes')
+    });
+    assert.match(clip.audioUrl, /\.mp3$/);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
 
 test('clip store persists uploaded clips and rejects bad input', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'zapp-data-'));
