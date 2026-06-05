@@ -9,6 +9,8 @@ const files = [
   'src/frontend/main.js',
   'src/frontend/styles.css',
   'src/frontend/viewModel.js',
+  'src/frontend/audioEditor.js',
+  'src/frontend/wavEncoder.js',
   'src/data/clips.js',
   'src/search/searchEngine.js',
   'src/audio/formatPolicy.js'

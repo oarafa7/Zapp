@@ -489,6 +489,44 @@ h2 {
 }
 .upload-form__submit:active { transform: scale(0.98); }
 
+.trim-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--stroke);
+  background: rgba(98, 244, 217, 0.06);
+}
+
+.trim-editor__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.trim-editor__row strong { color: var(--ink); }
+
+.trim-slider { display: block; }
+.trim-slider input[type="range"] { width: 100%; accent-color: var(--zapp-3); }
+
+.trim-actions { display: flex; gap: 10px; margin-top: 4px; }
+.trim-btn {
+  flex: 1;
+  min-height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.trim-btn:active { transform: scale(0.98); }
+
+.trim-hint { margin: 2px; font-size: 0.85rem; color: var(--muted-2); }
+
 .upload-panel__status { margin: 2px; min-height: 1.1em; font-size: 0.85rem; color: var(--muted-2); }
 .upload-panel__status.is-error { color: #ff8a8a; }
 .upload-panel__status.is-ok { color: var(--zapp-3); }

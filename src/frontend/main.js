@@ -1,6 +1,7 @@
 import { clipCatalog } from '../data/clips.js';
 import { audioFormatPolicy, estimateClipSizeBytes } from '../audio/formatPolicy.js';
 import { formatDuration, formatSize, getFrontendState, quickTriggers } from './viewModel.js';
+import { decodeAudioFile, trimToWavBlob } from './audioEditor.js';
 
 const localeFilters = [
   { label: 'All', value: 'all' },
@@ -21,6 +22,33 @@ let uploadedClips = [];
 let uploadMessage = null;
 const getCatalog = () => clipCatalog.concat(uploadedClips);
 const findClip = (id) => getCatalog().find((clip) => clip.id === id);
+
+// In-browser audio trimmer state for the upload flow. The decoded buffer lets us
+// produce a trimmed WAV client-side; editor.file is the original chosen file.
+const editor = {
+  file: null,
+  objectUrl: null,
+  buffer: null,
+  duration: 0,
+  start: 0,
+  end: 0,
+  loading: false,
+  error: ''
+};
+
+const formatSeconds = (value) => `${Math.max(0, value).toFixed(1)}s`;
+
+function resetEditor() {
+  if (editor.objectUrl) URL.revokeObjectURL(editor.objectUrl);
+  editor.file = null;
+  editor.objectUrl = null;
+  editor.buffer = null;
+  editor.duration = 0;
+  editor.start = 0;
+  editor.end = 0;
+  editor.loading = false;
+  editor.error = '';
+}
 
 const root = document.getElementById('root');
 
@@ -136,24 +164,6 @@ function renderKeyboard({ query, locale, results, selectedClip }) {
   `;
 }
 
-function renderDiscovery(rails) {
-  const triggerRails = Object.entries(rails.triggers).slice(0, 4);
-  const sourceRails = Object.entries(rails.sources).slice(0, 4);
-  return `
-    <section class="panel discovery-panel" aria-labelledby="discovery-title">
-      <div class="section-heading"><p>Discovery</p><h2 id="discovery-title">Browse by feeling or archive</h2></div>
-      <div class="rail-grid">
-        ${triggerRails.map(([trigger, clips]) => `
-          <article class="rail-card"><span>Trigger</span><strong>${escapeHtml(trigger)}</strong><small>${clips.map((clip) => clip.icon).join(' ')}</small></article>
-        `).join('')}
-        ${sourceRails.map(([source, clips]) => `
-          <article class="rail-card rail-card--source"><span>Source</span><strong>${escapeHtml(source)}</strong><small>${clips.length} ready clip${clips.length === 1 ? '' : 's'}</small></article>
-        `).join('')}
-      </div>
-    </section>
-  `;
-}
-
 function renderReceipt(selectedClip) {
   const estimatedBytes = estimateClipSizeBytes(selectedClip.durationMs);
   return `
@@ -184,6 +194,34 @@ function renderReceipt(selectedClip) {
   `;
 }
 
+function renderTrimControls() {
+  if (editor.loading) return `<p class="trim-hint">Analyzing audio…</p>`;
+  if (!editor.file) return '';
+  if (!editor.buffer) {
+    const prefix = editor.error ? `${escapeHtml(editor.error)} ` : '';
+    return `<p class="trim-hint">${prefix}Trimming isn’t available for this file — it will upload as-is.</p>`;
+  }
+  const dur = editor.duration;
+  return `
+    <div class="trim-editor" aria-label="Trim audio before saving">
+      <div class="trim-editor__row">
+        <strong>Trim</strong>
+        <span id="trim-readout">${formatSeconds(editor.start)} – ${formatSeconds(editor.end)} · ${formatSeconds(editor.end - editor.start)} clip</span>
+      </div>
+      <label class="trim-slider"><span class="sr-only">Start time</span>
+        <input id="trim-start" type="range" min="0" max="${dur}" step="0.01" value="${editor.start}" />
+      </label>
+      <label class="trim-slider"><span class="sr-only">End time</span>
+        <input id="trim-end" type="range" min="0" max="${dur}" step="0.01" value="${editor.end}" />
+      </label>
+      <div class="trim-actions">
+        <button type="button" class="trim-btn" id="trim-preview">▶️ Preview selection</button>
+        <button type="button" class="trim-btn" id="trim-reset">↺ Reset</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderUpload() {
   const statusClass = uploadMessage ? (uploadMessage.error ? 'is-error' : 'is-ok') : '';
   const statusText = uploadMessage ? escapeHtml(uploadMessage.text) : '';
@@ -195,6 +233,7 @@ function renderUpload() {
           <span>Audio file (mp3, wav, m4a, ogg · max 5MB)</span>
           <input id="upload-file" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac,.opus,.webm" required />
         </label>
+        ${renderTrimControls()}
         <label class="upload-field">
           <span>Title</span>
           <input id="upload-title-input" type="text" placeholder="e.g. Victory Horn" maxlength="60" required />
@@ -252,7 +291,6 @@ function render() {
         <div id="keyboard">${renderKeyboard({ ...state, selectedClip })}</div>
       </section>
       <section class="content-grid" id="design-system">
-        ${renderDiscovery(state.rails)}
         ${renderReceipt(selectedClip)}
         ${renderUpload()}
       </section>
@@ -309,6 +347,90 @@ function bindEvents() {
     event.preventDefault();
     uploadClip(event.currentTarget);
   });
+
+  document.getElementById('upload-file')?.addEventListener('change', (event) => {
+    handleFileSelected(event.target);
+  });
+
+  document.getElementById('trim-start')?.addEventListener('input', (event) => {
+    editor.start = Math.min(Number(event.target.value), editor.end - 0.05);
+    if (editor.start < 0) editor.start = 0;
+    event.target.value = editor.start;
+    updateTrimReadout();
+  });
+
+  document.getElementById('trim-end')?.addEventListener('input', (event) => {
+    editor.end = Math.max(Number(event.target.value), editor.start + 0.05);
+    if (editor.end > editor.duration) editor.end = editor.duration;
+    event.target.value = editor.end;
+    updateTrimReadout();
+  });
+
+  document.getElementById('trim-preview')?.addEventListener('click', previewSelection);
+  document.getElementById('trim-reset')?.addEventListener('click', () => {
+    editor.start = 0;
+    editor.end = editor.duration;
+    const startEl = document.getElementById('trim-start');
+    const endEl = document.getElementById('trim-end');
+    if (startEl) startEl.value = 0;
+    if (endEl) endEl.value = editor.duration;
+    updateTrimReadout();
+  });
+}
+
+function updateTrimReadout() {
+  const node = document.getElementById('trim-readout');
+  if (node) {
+    node.textContent = `${formatSeconds(editor.start)} – ${formatSeconds(editor.end)} · ${formatSeconds(editor.end - editor.start)} clip`;
+  }
+}
+
+// Plays only the selected [start, end) region of the loaded source file.
+function previewSelection() {
+  if (!previewPlayer || !editor.objectUrl) return;
+  previewPlayer.pause();
+  previewPlayer.src = editor.objectUrl;
+  const stopAt = () => {
+    if (previewPlayer.currentTime >= editor.end) {
+      previewPlayer.pause();
+      previewPlayer.removeEventListener('timeupdate', stopAt);
+    }
+  };
+  previewPlayer.removeEventListener('timeupdate', stopAt);
+  previewPlayer.addEventListener('timeupdate', stopAt);
+  const begin = () => {
+    previewPlayer.currentTime = editor.start;
+    previewPlayer.play().catch(() => {});
+    previewPlayer.removeEventListener('loadedmetadata', begin);
+  };
+  if (previewPlayer.readyState >= 1) begin();
+  else previewPlayer.addEventListener('loadedmetadata', begin);
+}
+
+// Decodes a freshly chosen file so it can be trimmed; falls back gracefully if
+// the browser can't decode the format (the original still uploads as-is).
+async function handleFileSelected(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  if (editor.objectUrl) URL.revokeObjectURL(editor.objectUrl);
+  editor.file = file;
+  editor.objectUrl = URL.createObjectURL(file);
+  editor.buffer = null;
+  editor.error = '';
+  editor.loading = true;
+  render();
+  try {
+    const buffer = await decodeAudioFile(file);
+    editor.buffer = buffer;
+    editor.duration = buffer.duration;
+    editor.start = 0;
+    editor.end = buffer.duration;
+  } catch {
+    editor.error = 'Could not read this audio for trimming.';
+  } finally {
+    editor.loading = false;
+    render();
+  }
 }
 
 function setUploadStatus(text, error) {
@@ -322,30 +444,46 @@ function setUploadStatus(text, error) {
 // Sends the raw audio bytes to the backend with metadata in the query string,
 // which keeps the server free of any multipart-parsing dependency.
 async function uploadClip(form) {
-  const file = form.querySelector('#upload-file')?.files?.[0];
+  const sourceFile = editor.file || form.querySelector('#upload-file')?.files?.[0];
   const title = form.querySelector('#upload-title-input').value.trim();
   const triggers = form.querySelector('#upload-triggers').value.trim();
   const locale = form.querySelector('#upload-locale').value;
   const icon = form.querySelector('#upload-icon').value.trim();
   const token = form.querySelector('#upload-token').value.trim();
 
-  if (!file) return setUploadStatus('Choose an audio file first.', true);
+  if (!sourceFile) return setUploadStatus('Choose an audio file first.', true);
   if (!title) return setUploadStatus('Add a title.', true);
   if (!triggers) return setUploadStatus('Add at least one trigger tag.', true);
 
+  // If the user trimmed the clip, encode the selected region to WAV client-side.
+  let body = sourceFile;
+  let contentType = sourceFile.type || 'application/octet-stream';
+  let filename = sourceFile.name || 'clip';
+  const isTrimmed = editor.buffer && (editor.start > 0.01 || editor.end < editor.duration - 0.01);
+  if (isTrimmed) {
+    try {
+      body = trimToWavBlob(editor.buffer, editor.start, editor.end);
+      contentType = 'audio/wav';
+      filename = `${(sourceFile.name || 'clip').replace(/\.[^.]+$/, '')}-trimmed.wav`;
+    } catch {
+      return setUploadStatus('Could not trim the audio. Try Reset and upload the full clip.', true);
+    }
+  }
+
   setUploadStatus('Uploading…', false);
-  const params = new URLSearchParams({ title, triggers, locale, icon, filename: file.name || '' });
-  const headers = { 'content-type': file.type || 'application/octet-stream' };
+  const params = new URLSearchParams({ title, triggers, locale, icon, filename });
+  const headers = { 'content-type': contentType };
   if (token) headers['x-zapp-admin'] = token;
 
   try {
-    const response = await fetch(`/api/clips?${params.toString()}`, { method: 'POST', headers, body: file });
+    const response = await fetch(`/api/clips?${params.toString()}`, { method: 'POST', headers, body });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Upload failed (${response.status}).`);
     uploadedClips = uploadedClips.concat(data.clip);
     appState.query = '';
     appState.selectedClipId = data.clip.id;
     uploadMessage = { text: `“${data.clip.title}” is live in your catalog.`, error: false };
+    resetEditor();
     render();
     playClip(data.clip);
   } catch (error) {
