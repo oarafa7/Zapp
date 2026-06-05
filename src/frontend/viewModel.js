@@ -13,11 +13,11 @@ export function formatSize(bytes) {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
-export function getFrontendState({ query = '', locale = 'all', season = 'ramadan' } = {}) {
+export function getFrontendState({ query = '', locale = 'all', season = 'ramadan', catalog = clipCatalog } = {}) {
   const localeOption = locale === 'all' ? undefined : locale;
-  const results = searchAudioGifs(query, clipCatalog, { locale: localeOption, season, limit: 8 });
-  const rails = groupByDiscoveryRail(clipCatalog);
-  const selected = results[0] || clipCatalog[0];
+  const results = searchAudioGifs(query, catalog, { locale: localeOption, season, limit: 8 });
+  const rails = groupByDiscoveryRail(catalog);
+  const selected = results[0] || catalog[0];
 
   return {
     query,

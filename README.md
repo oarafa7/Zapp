@@ -11,6 +11,16 @@ Zapp is a prototype mobile application and custom keyboard extension for sending
 - A searchable Audio GIF catalog seeded with Arabic and international culture examples, plus a Ramadan content injection queue.
 - Audio format policy and catalog validation checks for low-latency sharing.
 
+## Uploading your own sounds
+
+The app has a built-in **"Upload your own Audio GIF"** panel. Pick an audio file
+(mp3/wav/m4a/ogg, ≤ 5 MB), give it a title and trigger tags, and it's added to
+the live catalog immediately — searchable, playable, and sendable like any other
+clip. Uploads are stored on a persistent **Railway Volume** so they survive
+restarts (see `docs/railway-deploy.md`). Set `ZAPP_ADMIN_TOKEN` to gate uploads
+on a public deployment. API: `GET /api/clips` (list) and `POST /api/clips`
+(raw audio body, metadata in query params).
+
 ## How to "try it on WhatsApp" (MVP)
 
 1. Open the deployed site on your phone.

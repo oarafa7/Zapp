@@ -16,6 +16,23 @@ Zapp is now Railway-ready as a Node.js web service. The repository includes the 
 
 That Railway error usually appears when the selected deployment root does not contain recognized application files. For this project, make sure Railway points at the repository root where `package.json`, `server.js`, `start.sh`, `railway.json`, and `Dockerfile` live.
 
+## Persisting uploaded clips (Railway Volume)
+
+User-uploaded Audio GIFs are written to a writable data directory. Railway
+containers have an **ephemeral filesystem**, so without a Volume every upload
+disappears on the next deploy or restart. To keep uploads:
+
+1. In your Railway service, open **Settings → Volumes → Add Volume**.
+2. Set the **mount path** to `/data`.
+3. Add a service **variable**: `ZAPP_DATA_DIR=/data`.
+4. (Recommended for a public URL) add `ZAPP_ADMIN_TOKEN=<a-long-secret>` so only
+   people with the token can upload. With it set, the upload form's "Admin
+   token" field must match. Leave it unset to allow open uploads (fine for a
+   private demo).
+5. Redeploy. Uploaded clips and their `clips.json` index now live on the Volume.
+
+Local development uses `./data` by default (git-ignored).
+
 ## Runtime behavior
 
 - `npm run build` copies the static frontend into `dist/`.

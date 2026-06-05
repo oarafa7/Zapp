@@ -15,6 +15,13 @@ const appState = {
   selectedClipId: null
 };
 
+// User-uploaded clips are loaded from the backend at startup and merged with the
+// built-in catalog so they show up in search, discovery, and the send flow.
+let uploadedClips = [];
+let uploadMessage = null;
+const getCatalog = () => clipCatalog.concat(uploadedClips);
+const findClip = (id) => getCatalog().find((clip) => clip.id === id);
+
 const root = document.getElementById('root');
 
 const ATTRIBUTION = 'Sent via Zapp';
@@ -177,8 +184,50 @@ function renderReceipt(selectedClip) {
   `;
 }
 
+function renderUpload() {
+  const statusClass = uploadMessage ? (uploadMessage.error ? 'is-error' : 'is-ok') : '';
+  const statusText = uploadMessage ? escapeHtml(uploadMessage.text) : '';
+  return `
+    <section class="panel upload-panel" aria-labelledby="upload-title">
+      <div class="section-heading"><p>Add a sound</p><h2 id="upload-title">Upload your own Audio GIF</h2></div>
+      <form id="upload-form" class="upload-form">
+        <label class="upload-field">
+          <span>Audio file (mp3, wav, m4a, ogg · max 5MB)</span>
+          <input id="upload-file" type="file" accept="audio/*" required />
+        </label>
+        <label class="upload-field">
+          <span>Title</span>
+          <input id="upload-title-input" type="text" placeholder="e.g. Victory Horn" maxlength="60" required />
+        </label>
+        <label class="upload-field">
+          <span>Trigger tags (comma separated)</span>
+          <input id="upload-triggers" type="text" placeholder="win, hype, bonus" required />
+        </label>
+        <div class="upload-row">
+          <label class="upload-field upload-field--small">
+            <span>Locale</span>
+            <select id="upload-locale">
+              ${localeFilters.filter((f) => f.value !== 'all').map((f) => `<option value="${f.value}">${f.label}</option>`).join('')}
+            </select>
+          </label>
+          <label class="upload-field upload-field--small">
+            <span>Emoji</span>
+            <input id="upload-icon" type="text" value="🔊" maxlength="4" />
+          </label>
+        </div>
+        <label class="upload-field">
+          <span>Admin token (only if the server requires one)</span>
+          <input id="upload-token" type="password" placeholder="leave blank if not set" autocomplete="off" />
+        </label>
+        <button type="submit" class="upload-form__submit">⬆️ Upload clip</button>
+        <p id="upload-status" class="upload-panel__status ${statusClass}" role="status">${statusText}</p>
+      </form>
+    </section>
+  `;
+}
+
 function render() {
-  const state = getFrontendState({ query: appState.query, locale: appState.locale });
+  const state = getFrontendState({ query: appState.query, locale: appState.locale, catalog: getCatalog() });
   const selectedClip = state.results.find((clip) => clip.id === appState.selectedClipId) || state.selected;
   appState.selectedClipId = selectedClip.id;
 
@@ -195,7 +244,7 @@ function render() {
             <a class="secondary-action" href="#design-system">Design system</a>
           </div>
           <div class="metric-strip" aria-label="Product constraints">
-            <span><strong>${clipCatalog.length}</strong> seed clips</span>
+            <span><strong>${getCatalog().length}</strong> clips</span>
             <span><strong>${audioFormatPolicy.preview.maxDurationMs / 1000}s</strong> max preview</span>
             <span><strong>512KB</strong> send target</span>
           </div>
@@ -205,6 +254,7 @@ function render() {
       <section class="content-grid" id="design-system">
         ${renderDiscovery(state.rails)}
         ${renderReceipt(selectedClip)}
+        ${renderUpload()}
       </section>
     </main>
   `;
@@ -239,7 +289,7 @@ function bindEvents() {
   document.querySelectorAll('.clip-card[data-clip-id]').forEach((button) => {
     button.addEventListener('click', () => {
       appState.selectedClipId = button.dataset.clipId;
-      const clip = clipCatalog.find((item) => item.id === appState.selectedClipId);
+      const clip = findClip(appState.selectedClipId);
       if (clip) playClip(clip);
       render();
     });
@@ -247,13 +297,75 @@ function bindEvents() {
 
   document.querySelectorAll('[data-action]').forEach((button) => {
     button.addEventListener('click', () => {
-      const clip = clipCatalog.find((item) => item.id === button.dataset.clipId);
+      const clip = findClip(button.dataset.clipId);
       if (!clip) return;
       if (button.dataset.action === 'download') downloadClip(clip);
       else if (button.dataset.action === 'play') playClip(clip);
       else if (button.dataset.action === 'whatsapp') sendToWhatsApp(clip);
     });
   });
+
+  document.getElementById('upload-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    uploadClip(event.currentTarget);
+  });
+}
+
+function setUploadStatus(text, error) {
+  const node = document.getElementById('upload-status');
+  if (!node) return;
+  node.textContent = text;
+  node.classList.toggle('is-error', Boolean(error));
+  node.classList.toggle('is-ok', !error);
+}
+
+// Sends the raw audio bytes to the backend with metadata in the query string,
+// which keeps the server free of any multipart-parsing dependency.
+async function uploadClip(form) {
+  const file = form.querySelector('#upload-file')?.files?.[0];
+  const title = form.querySelector('#upload-title-input').value.trim();
+  const triggers = form.querySelector('#upload-triggers').value.trim();
+  const locale = form.querySelector('#upload-locale').value;
+  const icon = form.querySelector('#upload-icon').value.trim();
+  const token = form.querySelector('#upload-token').value.trim();
+
+  if (!file) return setUploadStatus('Choose an audio file first.', true);
+  if (!title) return setUploadStatus('Add a title.', true);
+  if (!triggers) return setUploadStatus('Add at least one trigger tag.', true);
+
+  setUploadStatus('Uploading…', false);
+  const params = new URLSearchParams({ title, triggers, locale, icon });
+  const headers = { 'content-type': file.type || 'application/octet-stream' };
+  if (token) headers['x-zapp-admin'] = token;
+
+  try {
+    const response = await fetch(`/api/clips?${params.toString()}`, { method: 'POST', headers, body: file });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Upload failed (${response.status}).`);
+    uploadedClips = uploadedClips.concat(data.clip);
+    appState.query = '';
+    appState.selectedClipId = data.clip.id;
+    uploadMessage = { text: `“${data.clip.title}” is live in your catalog.`, error: false };
+    render();
+    playClip(data.clip);
+  } catch (error) {
+    setUploadStatus(error.message || 'Upload failed.', true);
+  }
+}
+
+async function loadUploadedClips() {
+  try {
+    const response = await fetch('/api/clips');
+    if (!response.ok) return;
+    const data = await response.json();
+    if (Array.isArray(data.clips) && data.clips.length) {
+      uploadedClips = data.clips;
+      render();
+    }
+  } catch {
+    // Backend not reachable (e.g. opened as a static file); keep built-in clips.
+  }
 }
 
 render();
+loadUploadedClips();

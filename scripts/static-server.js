@@ -1,6 +1,14 @@
 import { createReadStream, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
+import {
+  addUploadedClip,
+  listUploadedClips,
+  resolveDataDir,
+  resolveUploadPath,
+  ClipUploadError,
+  MAX_UPLOAD_BYTES
+} from './clipStore.js';
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -15,7 +23,8 @@ const mimeTypes = {
   '.mp3': 'audio/mpeg',
   '.ogg': 'audio/ogg',
   '.opus': 'audio/ogg',
-  '.m4a': 'audio/mp4'
+  '.m4a': 'audio/mp4',
+  '.webm': 'audio/webm'
 };
 
 function isInsideRoot(rootDirectory, filePath) {
@@ -23,15 +32,98 @@ function isInsideRoot(rootDirectory, filePath) {
   return filePath === rootDirectory || relative.startsWith(sep);
 }
 
-export function createRequestHandler({ rootDirectory = process.cwd() } = {}) {
-  const resolvedRoot = resolve(rootDirectory);
+function sendJson(response, status, payload) {
+  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  response.end(JSON.stringify(payload));
+}
 
-  return (request, response) => {
-    const { pathname } = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+function readBody(request, maxBytes) {
+  return new Promise((resolveBody, reject) => {
+    const chunks = [];
+    let size = 0;
+    request.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new ClipUploadError('Audio file exceeds the 5 MB limit.', 413));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => resolveBody(Buffer.concat(chunks)));
+    request.on('error', reject);
+  });
+}
+
+// Uploads are open by default for a quick MVP. Set ZAPP_ADMIN_TOKEN to require
+// an `x-zapp-admin` header before anyone can add clips on a public deployment.
+function isAuthorized(request) {
+  const token = process.env.ZAPP_ADMIN_TOKEN;
+  if (!token) return true;
+  return request.headers['x-zapp-admin'] === token;
+}
+
+async function handleClipUpload(request, response, url, dataDirectory) {
+  if (!isAuthorized(request)) {
+    sendJson(response, 401, { error: 'Admin token required to upload clips.' });
+    return;
+  }
+  try {
+    const buffer = await readBody(request, MAX_UPLOAD_BYTES);
+    const clip = await addUploadedClip(dataDirectory, {
+      title: url.searchParams.get('title'),
+      triggers: url.searchParams.get('triggers'),
+      locale: url.searchParams.get('locale'),
+      icon: url.searchParams.get('icon'),
+      contentType: request.headers['content-type'],
+      buffer
+    });
+    sendJson(response, 201, { clip });
+  } catch (error) {
+    const status = error instanceof ClipUploadError ? error.status : 500;
+    if (status === 500) console.error('Clip upload failed:', error);
+    sendJson(response, status, { error: error.message || 'Upload failed.' });
+  }
+}
+
+export function createRequestHandler({ rootDirectory = process.cwd(), dataDirectory } = {}) {
+  const resolvedRoot = resolve(rootDirectory);
+  const resolvedData = resolveDataDir(dataDirectory);
+
+  return async (request, response) => {
+    const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+    const { pathname } = url;
 
     if (pathname === '/health') {
-      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ ok: true, service: 'zapp-audio-gifs' }));
+      sendJson(response, 200, { ok: true, service: 'zapp-audio-gifs' });
+      return;
+    }
+
+    // Catalog API for user-uploaded clips.
+    if (pathname === '/api/clips') {
+      if (request.method === 'GET') {
+        sendJson(response, 200, { clips: await listUploadedClips(resolvedData) });
+        return;
+      }
+      if (request.method === 'POST') {
+        await handleClipUpload(request, response, url, resolvedData);
+        return;
+      }
+      response.writeHead(405, { 'content-type': 'text/plain; charset=utf-8', allow: 'GET, POST' });
+      response.end('Method not allowed');
+      return;
+    }
+
+    // Serve uploaded audio from the (persistent) data directory.
+    if (pathname.startsWith('/uploads/audio/')) {
+      const uploadPath = resolveUploadPath(resolvedData, pathname);
+      if (!uploadPath || !existsSync(uploadPath)) {
+        response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+        response.end('Not found');
+        return;
+      }
+      response.writeHead(200, { 'content-type': mimeTypes[extname(uploadPath)] || 'application/octet-stream' });
+      createReadStream(uploadPath).pipe(response);
       return;
     }
 
@@ -50,10 +142,11 @@ export function createRequestHandler({ rootDirectory = process.cwd() } = {}) {
   };
 }
 
-export function startStaticServer({ port = Number(process.env.PORT || 5173), rootDirectory = process.cwd() } = {}) {
-  const server = createServer(createRequestHandler({ rootDirectory }));
+export function startStaticServer({ port = Number(process.env.PORT || 5173), rootDirectory = process.cwd(), dataDirectory } = {}) {
+  const server = createServer(createRequestHandler({ rootDirectory, dataDirectory }));
   server.listen(port, '0.0.0.0', () => {
     console.log(`Zapp frontend running at http://localhost:${port}`);
+    console.log(`Uploaded clips persist in ${resolveDataDir(dataDirectory)}`);
   });
   return server;
 }
