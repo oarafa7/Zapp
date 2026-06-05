@@ -29,6 +29,12 @@ test('static server exposes health check and serves frontend files', async () =>
   const javascript = await fetch(`http://127.0.0.1:${port}/src/frontend/main.js`);
   assert.equal(javascript.headers.get('content-type'), 'text/javascript; charset=utf-8');
 
+  await mkdir(join(rootDirectory, 'assets', 'audio'), { recursive: true });
+  await writeFile(join(rootDirectory, 'assets', 'audio', 'clip.wav'), Buffer.from('RIFF'));
+  const audio = await fetch(`http://127.0.0.1:${port}/assets/audio/clip.wav`);
+  assert.equal(audio.status, 200);
+  assert.equal(audio.headers.get('content-type'), 'audio/wav');
+
   server.close();
   await once(server, 'close');
 });

@@ -1,0 +1,17 @@
+{
+  "name": "Zapp · Audio GIFs",
+  "short_name": "Zapp",
+  "description": "Send the sound already playing in your head. Search, tap, and share Audio GIFs straight into WhatsApp.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#12091f",
+  "theme_color": "#12091f",
+  "icons": [
+    {
+      "src": "/assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

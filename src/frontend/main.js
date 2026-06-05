@@ -17,6 +17,60 @@ const appState = {
 
 const root = document.getElementById('root');
 
+const ATTRIBUTION = 'Sent via Zapp';
+
+// One reusable audio element so tapping a new clip stops the previous preview.
+const previewPlayer = typeof Audio !== 'undefined' ? new Audio() : null;
+
+function playClip(clip) {
+  if (!previewPlayer || !clip?.audioUrl) return;
+  previewPlayer.pause();
+  previewPlayer.src = clip.audioUrl;
+  previewPlayer.currentTime = 0;
+  previewPlayer.play().catch(() => {
+    // Autoplay can be blocked until the first user gesture; tapping again works.
+  });
+}
+
+// Frictionless "Search > Tap > Sent": fetch the real audio file and hand it to
+// the OS share sheet so the user can drop it straight into WhatsApp. Where the
+// Web Share API can't attach files (most desktop browsers) we fall back to a
+// wa.me deep link carrying a playable URL plus the viral attribution.
+async function sendToWhatsApp(clip) {
+  const caption = `${clip.title} · ${ATTRIBUTION}`;
+  try {
+    const response = await fetch(clip.audioUrl);
+    if (!response.ok) throw new Error(`audio ${response.status}`);
+    const blob = await response.blob();
+    const fileName = `${clip.id}.${(clip.audioUrl.split('.').pop() || 'wav')}`;
+    const file = new File([blob], fileName, { type: blob.type || 'audio/wav' });
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], text: caption });
+      return;
+    }
+    if (navigator.share) {
+      await navigator.share({ text: caption, url: new URL(clip.audioUrl, location.href).href });
+      return;
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') return; // user dismissed the share sheet
+  }
+  const link = new URL(clip.audioUrl, location.href).href;
+  window.open(`https://wa.me/?text=${encodeURIComponent(`${caption} ${link}`)}`, '_blank', 'noopener');
+}
+
+// MVP send path that works everywhere: save the clip as a file the user can
+// then attach (or send as a voice note) inside WhatsApp.
+function downloadClip(clip) {
+  const fileName = `${clip.id}.${clip.audioUrl.split('.').pop() || 'wav'}`;
+  const anchor = document.createElement('a');
+  anchor.href = clip.audioUrl;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -103,10 +157,22 @@ function renderReceipt(selectedClip) {
         <div><strong>${escapeHtml(selectedClip.title)}</strong><span>${escapeHtml(selectedClip.attribution)}</span></div>
       </div>
       <dl class="payload-list">
-        <div><dt>MIME</dt><dd>audio/ogg; codecs=opus</dd></div>
+        <div><dt>Length</dt><dd>${formatDuration(selectedClip.durationMs)}</dd></div>
         <div><dt>Size</dt><dd>${formatSize(estimatedBytes)}</dd></div>
-        <div><dt>Preview</dt><dd>${audioFormatPolicy.preview.codec} · preload top results</dd></div>
+        <div><dt>Caption</dt><dd>${escapeHtml(selectedClip.attribution)}</dd></div>
       </dl>
+      <div class="send-actions">
+        <button class="send-actions__primary" data-action="download" data-clip-id="${selectedClip.id}">
+          ⬇️ Download clip
+        </button>
+        <button class="send-actions__secondary" data-action="play" data-clip-id="${selectedClip.id}">
+          ▶️ Play
+        </button>
+        <button class="send-actions__secondary" data-action="whatsapp" data-clip-id="${selectedClip.id}">
+          💬 Share to WhatsApp
+        </button>
+      </div>
+      <p class="send-actions__hint">Save the clip, then attach it (or send it as a voice note) in WhatsApp. “Share to WhatsApp” opens the share sheet directly on supported phones.</p>
     </section>
   `;
 }
@@ -170,10 +236,22 @@ function bindEvents() {
     });
   });
 
-  document.querySelectorAll('[data-clip-id]').forEach((button) => {
+  document.querySelectorAll('.clip-card[data-clip-id]').forEach((button) => {
     button.addEventListener('click', () => {
       appState.selectedClipId = button.dataset.clipId;
+      const clip = clipCatalog.find((item) => item.id === appState.selectedClipId);
+      if (clip) playClip(clip);
       render();
+    });
+  });
+
+  document.querySelectorAll('[data-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const clip = clipCatalog.find((item) => item.id === button.dataset.clipId);
+      if (!clip) return;
+      if (button.dataset.action === 'download') downloadClip(clip);
+      else if (button.dataset.action === 'play') playClip(clip);
+      else if (button.dataset.action === 'whatsapp') sendToWhatsApp(clip);
     });
   });
 }

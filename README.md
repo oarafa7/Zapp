@@ -4,12 +4,21 @@ Zapp is a prototype mobile application and custom keyboard extension for sending
 
 ## What is included
 
-- A no-dependency web frontend framework with a polished landing page, keyboard mockup, search controls, and send payload preview.
-- A React Native app shell that supports the core `Search > Tap > Sent` journey.
-- A keyboard extension integration contract for iOS and Android host apps.
-- A searchable Audio GIF catalog seeded with Arabic and international culture examples.
-- A Ramadan content injection queue for near-real-time administrator uploads.
+- A no-dependency web app (deployable on Railway) with a polished landing page, keyboard mockup, and live search.
+- **Real, playable Audio GIFs.** Clips are synthesized at build time (license-free) so every catalog entry can be previewed and sent — no external CDN required.
+- A working **MVP send flow**: tap to preview, **Download clip** to save the file, then attach it (or send it as a voice note) in WhatsApp. On phones that support the Web Share API, **Share to WhatsApp** opens the share sheet directly.
+- A React Native app shell and an iOS/Android keyboard-extension integration contract describing the longer-term native product.
+- A searchable Audio GIF catalog seeded with Arabic and international culture examples, plus a Ramadan content injection queue.
 - Audio format policy and catalog validation checks for low-latency sharing.
+
+## How to "try it on WhatsApp" (MVP)
+
+1. Open the deployed site on your phone.
+2. Search a trigger (`brb`, `cringe`, `i got a bonus`, `تمام`) and tap a clip to hear it.
+3. Tap **Download clip** to save the audio file.
+4. In WhatsApp, attach the saved file (or send it as a voice note). The caption carries the `Sent via Zapp` attribution.
+
+> **Scope note:** A true *system-wide keyboard* that injects audio directly into WhatsApp/iMessage is a native iOS/Android app (App Store / Play Store), and on iOS custom keyboards cannot attach media at all — so it can't be hosted on Railway. This repo delivers the deployable web MVP today; `app/App.jsx` and `keyboard/extension-contract.md` capture the native vision for later.
 
 ## Development commands
 
