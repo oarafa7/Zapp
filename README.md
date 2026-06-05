@@ -13,22 +13,19 @@ Zapp is a prototype mobile application and custom keyboard extension for sending
 
 ## Uploading your own sounds
 
-The app has a built-in **"Upload your own Audio GIF"** panel. You can add a clip
-two ways:
+The app has a built-in **"Upload your own Audio GIF"** panel:
 
 - **Upload a file** (mp3/wav/m4a/ogg, ≤ 5 MB), and optionally **trim** it first —
   a built-in browser trimmer lets you pick start/end, preview the selection, and
   save just that region (encoded to WAV client-side, works on iOS).
-- **Import from a direct audio link** — paste a URL to a hosted `.mp3`/`.m4a`/etc.
-  and the server fetches it (with SSRF protection + 5 MB/type limits). *(Not a
-  YouTube downloader — it must be a direct link to an audio file.)*
+- A **"Capture audio here"** button links out to an external ripper so users can
+  grab an MP3, download it, then upload + trim it here.
 
 New clips are added to the live catalog immediately — searchable, playable, and
 sendable like any other clip — and stored on a persistent **Railway Volume** so
 they survive restarts (see `docs/railway-deploy.md`). Set `ZAPP_ADMIN_TOKEN` to
-gate uploads on a public deployment. API: `GET /api/clips` (list),
-`POST /api/clips` (raw audio body, metadata in query), and
-`POST /api/clips/from-url` (JSON `{ title, triggers, sourceUrl, … }`).
+gate uploads on a public deployment. API: `GET /api/clips` (list) and
+`POST /api/clips` (raw audio body, metadata in query).
 
 ## How to "try it on WhatsApp" (MVP)
 
