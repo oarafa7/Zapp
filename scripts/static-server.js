@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import {
   addUploadedClip,
+  addClipFromUrl,
   listUploadedClips,
   resolveDataDir,
   resolveUploadPath,
@@ -55,12 +56,58 @@ function readBody(request, maxBytes) {
   });
 }
 
+function readJsonBody(request, maxBytes = 64 * 1024) {
+  return new Promise((resolveBody, reject) => {
+    const chunks = [];
+    let size = 0;
+    request.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new ClipUploadError('Request body too large.', 413));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => {
+      try {
+        resolveBody(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+      } catch {
+        reject(new ClipUploadError('Invalid JSON body.', 400));
+      }
+    });
+    request.on('error', reject);
+  });
+}
+
 // Uploads are open by default for a quick MVP. Set ZAPP_ADMIN_TOKEN to require
 // an `x-zapp-admin` header before anyone can add clips on a public deployment.
 function isAuthorized(request) {
   const token = process.env.ZAPP_ADMIN_TOKEN;
   if (!token) return true;
   return request.headers['x-zapp-admin'] === token;
+}
+
+async function handleClipFromUrl(request, response, dataDirectory) {
+  if (!isAuthorized(request)) {
+    sendJson(response, 401, { error: 'Admin token required to import clips.' });
+    return;
+  }
+  try {
+    const body = await readJsonBody(request);
+    const clip = await addClipFromUrl(dataDirectory, {
+      title: body.title,
+      triggers: body.triggers,
+      locale: body.locale,
+      icon: body.icon,
+      sourceUrl: body.sourceUrl
+    });
+    sendJson(response, 201, { clip });
+  } catch (error) {
+    const status = error instanceof ClipUploadError ? error.status : 500;
+    if (status === 500) console.error('Clip import failed:', error);
+    sendJson(response, status, { error: error.message || 'Import failed.' });
+  }
 }
 
 async function handleClipUpload(request, response, url, dataDirectory) {
@@ -97,6 +144,17 @@ export function createRequestHandler({ rootDirectory = process.cwd(), dataDirect
 
     if (pathname === '/health') {
       sendJson(response, 200, { ok: true, service: 'zapp-audio-gifs' });
+      return;
+    }
+
+    // Import a clip from a direct audio link.
+    if (pathname === '/api/clips/from-url') {
+      if (request.method === 'POST') {
+        await handleClipFromUrl(request, response, resolvedData);
+        return;
+      }
+      response.writeHead(405, { 'content-type': 'text/plain; charset=utf-8', allow: 'POST' });
+      response.end('Method not allowed');
       return;
     }
 

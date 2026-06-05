@@ -234,6 +234,11 @@ function renderUpload() {
           <input id="upload-file" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac,.opus,.webm" required />
         </label>
         ${renderTrimControls()}
+        <div class="upload-or"><span>or</span></div>
+        <label class="upload-field">
+          <span>Paste a direct audio link (.mp3 / .m4a / .wav / .ogg)</span>
+          <input id="upload-url" type="url" inputmode="url" placeholder="https://example.com/sound.mp3" autocomplete="off" />
+        </label>
         <label class="upload-field">
           <span>Title</span>
           <input id="upload-title-input" type="text" placeholder="e.g. Victory Horn" maxlength="60" required />
@@ -443,17 +448,48 @@ function setUploadStatus(text, error) {
 
 // Sends the raw audio bytes to the backend with metadata in the query string,
 // which keeps the server free of any multipart-parsing dependency.
+function onClipCreated(clip, verb) {
+  uploadedClips = uploadedClips.concat(clip);
+  appState.query = '';
+  appState.selectedClipId = clip.id;
+  uploadMessage = { text: `“${clip.title}” is ${verb} and live in your catalog.`, error: false };
+  resetEditor();
+  render();
+  playClip(clip);
+}
+
 async function uploadClip(form) {
   const sourceFile = editor.file || form.querySelector('#upload-file')?.files?.[0];
+  const sourceUrl = form.querySelector('#upload-url')?.value.trim();
   const title = form.querySelector('#upload-title-input').value.trim();
   const triggers = form.querySelector('#upload-triggers').value.trim();
   const locale = form.querySelector('#upload-locale').value;
   const icon = form.querySelector('#upload-icon').value.trim();
   const token = form.querySelector('#upload-token').value.trim();
 
-  if (!sourceFile) return setUploadStatus('Choose an audio file first.', true);
+  if (!sourceFile && !sourceUrl) return setUploadStatus('Choose an audio file or paste a link.', true);
   if (!title) return setUploadStatus('Add a title.', true);
   if (!triggers) return setUploadStatus('Add at least one trigger tag.', true);
+
+  // Import from a pasted link (only when no local file is chosen).
+  if (!sourceFile && sourceUrl) {
+    setUploadStatus('Importing from link…', false);
+    const headers = { 'content-type': 'application/json' };
+    if (token) headers['x-zapp-admin'] = token;
+    try {
+      const response = await fetch('/api/clips/from-url', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ title, triggers, locale, icon, sourceUrl })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Import failed (${response.status}).`);
+      onClipCreated(data.clip, 'imported');
+    } catch (error) {
+      setUploadStatus(error.message || 'Import failed.', true);
+    }
+    return;
+  }
 
   // If the user trimmed the clip, encode the selected region to WAV client-side.
   let body = sourceFile;
@@ -479,13 +515,7 @@ async function uploadClip(form) {
     const response = await fetch(`/api/clips?${params.toString()}`, { method: 'POST', headers, body });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Upload failed (${response.status}).`);
-    uploadedClips = uploadedClips.concat(data.clip);
-    appState.query = '';
-    appState.selectedClipId = data.clip.id;
-    uploadMessage = { text: `“${data.clip.title}” is live in your catalog.`, error: false };
-    resetEditor();
-    render();
-    playClip(data.clip);
+    onClipCreated(data.clip, 'uploaded');
   } catch (error) {
     setUploadStatus(error.message || 'Upload failed.', true);
   }

@@ -527,6 +527,23 @@ h2 {
 
 .trim-hint { margin: 2px; font-size: 0.85rem; color: var(--muted-2); }
 
+.upload-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted-2);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.upload-or::before,
+.upload-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--stroke);
+}
+
 .upload-panel__status { margin: 2px; min-height: 1.1em; font-size: 0.85rem; color: var(--muted-2); }
 .upload-panel__status.is-error { color: #ff8a8a; }
 .upload-panel__status.is-ok { color: var(--zapp-3); }

@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { lookup } from 'node:dns/promises';
 import { basename, extname, join, resolve } from 'node:path';
 
 // Persists user-uploaded Audio GIFs to a writable data directory. On Railway
@@ -82,14 +83,13 @@ export async function listUploadedClips(dataDirectory) {
   return readCatalog(resolveDataDir(dataDirectory));
 }
 
-export async function addUploadedClip(dataDirectory, { title, triggers, locale, icon, contentType, fileName, buffer }) {
-  const dataDir = resolveDataDir(dataDirectory);
+// Shared persistence: validates, writes the audio file, and appends to the
+// catalog. Both direct uploads and link imports funnel through here.
+async function persistClip(dataDir, { title, triggers, locale, icon, ext, buffer, source }) {
   const cleanTitle = String(title || '').trim();
   if (!cleanTitle) throw new ClipUploadError('A clip title is required.', 400);
-
-  const ext = extensionForContentType(contentType) || extensionForFileName(fileName);
-  if (!ext) throw new ClipUploadError(`Unsupported audio type: ${contentType || fileName || 'unknown'}`, 415);
-  if (!buffer?.length) throw new ClipUploadError('The uploaded audio file is empty.', 400);
+  if (!ext) throw new ClipUploadError('Unsupported audio type.', 415);
+  if (!buffer?.length) throw new ClipUploadError('The audio file is empty.', 400);
   if (buffer.length > MAX_UPLOAD_BYTES) throw new ClipUploadError('Audio file exceeds the 5 MB limit.', 413);
 
   const triggerTags = String(triggers || '')
@@ -107,7 +107,7 @@ export async function addUploadedClip(dataDirectory, { title, triggers, locale, 
   const clip = {
     id,
     title: cleanTitle,
-    source: 'Community Upload',
+    source: source || 'Community Upload',
     archive: 'My Library',
     locale: locale || 'en',
     durationMs: estimateDurationMs(buffer, ext),
@@ -129,6 +129,91 @@ export async function addUploadedClip(dataDirectory, { title, triggers, locale, 
   catalog.push(clip);
   await writeFile(join(dataDir, 'clips.json'), JSON.stringify(catalog, null, 2));
   return clip;
+}
+
+export async function addUploadedClip(dataDirectory, { title, triggers, locale, icon, contentType, fileName, buffer }) {
+  const ext = extensionForContentType(contentType) || extensionForFileName(fileName);
+  if (!ext) throw new ClipUploadError(`Unsupported audio type: ${contentType || fileName || 'unknown'}`, 415);
+  return persistClip(resolveDataDir(dataDirectory), {
+    title, triggers, locale, icon, ext, buffer, source: 'Community Upload'
+  });
+}
+
+// Blocks SSRF: refuse loopback/private/link-local addresses (incl. cloud
+// metadata 169.254.169.254) so a pasted link can't probe internal services.
+export function isPrivateIp(ip) {
+  if (ip.includes(':')) {
+    const lower = ip.toLowerCase();
+    return lower === '::1' || lower === '::' || lower.startsWith('fc') ||
+      lower.startsWith('fd') || lower.startsWith('fe80');
+  }
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return true;
+  const [a, b] = parts;
+  if (a === 10 || a === 127 || a === 0) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
+  return false;
+}
+
+function parseHttpUrl(value) {
+  let url;
+  try {
+    url = new URL(String(value || '').trim());
+  } catch {
+    throw new ClipUploadError('Enter a valid URL.', 400);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new ClipUploadError('Only http(s) links are supported.', 400);
+  }
+  return url;
+}
+
+async function assertPublicUrl(url) {
+  let addresses;
+  try {
+    addresses = await lookup(url.hostname, { all: true });
+  } catch {
+    throw new ClipUploadError('Could not resolve that host.', 400);
+  }
+  if (!addresses.length || addresses.some((entry) => isPrivateIp(entry.address))) {
+    throw new ClipUploadError('That address is not allowed.', 400);
+  }
+}
+
+// Imports a clip from a direct audio URL (mp3/m4a/etc). The server fetches it
+// so we avoid cross-origin issues; injectable fetchImpl keeps it testable.
+export async function addClipFromUrl(dataDirectory, { title, triggers, locale, icon, sourceUrl }, { fetchImpl = fetch } = {}) {
+  const url = parseHttpUrl(sourceUrl);
+  if (process.env.ZAPP_ALLOW_PRIVATE_FETCH !== '1') await assertPublicUrl(url);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  let response;
+  try {
+    response = await fetchImpl(url.href, { signal: controller.signal, redirect: 'follow' });
+  } catch {
+    throw new ClipUploadError('Could not fetch that link.', 502);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) throw new ClipUploadError(`Link returned ${response.status}.`, 502);
+
+  const contentType = response.headers.get?.('content-type') || '';
+  const ext = extensionForContentType(contentType) || extensionForFileName(url.pathname);
+  if (!ext) throw new ClipUploadError('That link is not a direct audio file (need .mp3/.m4a/.wav/.ogg).', 415);
+
+  const declaredLength = Number(response.headers.get?.('content-length') || 0);
+  if (declaredLength && declaredLength > MAX_UPLOAD_BYTES) {
+    throw new ClipUploadError('Audio at that link exceeds the 5 MB limit.', 413);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return persistClip(resolveDataDir(dataDirectory), {
+    title, triggers, locale, icon, ext, buffer, source: 'Imported link'
+  });
 }
 
 // Resolves a public /uploads/audio/<file> request to a path inside the data
